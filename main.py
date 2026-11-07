@@ -3,16 +3,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from infrastructure.persistence.mongodb.database import (
-    connect_to_mongodb,
-    close_mongodb_connection,
-    get_todo_collection,
-    get_user_collection,
-)
-from infrastructure.firebase.admin import initialize_firebase, close_firebase
-from infrastructure.persistence.mongodb.repositories.todo_repository import (
-    MongoTodoRepository,
-)
 from application.use_cases.create_todo import CreateTodo
 from application.use_cases.get_todo import GetTodo
 from application.use_cases.get_all_todos import GetAllTodos
@@ -21,12 +11,48 @@ from application.use_cases.patch_todo import PatchTodo
 from application.use_cases.delete_todo import DeleteTodo
 from presentation.controllers.todo_controller import TodoController
 from presentation.routes.todo_routes import create_todo_routes
-from infrastructure.persistence.mongodb.repositories.user_repository import MongoUserRepository
 from infrastructure.security.auth import PasswordHasher, TokenService
 from application.use_cases.sign_up import SignUp
 from application.use_cases.log_in import LogIn
 from presentation.controllers.auth_controller import AuthController
 from presentation.routes.auth_routes import create_auth_routes
+from infrastructure.config.settings import settings
+
+
+if settings.DATABASE_PROVIDER == "mongodb":
+    from infrastructure.database.mongodb.client import (
+        connect_to_mongodb as connect_database,
+        close_mongodb_connection as close_database,
+        get_todo_collection,
+        get_user_collection,
+    )
+    from infrastructure.repositories.mongodb.todo_repository import MongoTodoRepository
+    from infrastructure.repositories.mongodb.user_repository import MongoUserRepository
+
+    todo_repository = MongoTodoRepository(collection=get_todo_collection())
+    user_repository = MongoUserRepository(collection=get_user_collection())
+elif settings.DATABASE_PROVIDER == "firebase":
+    from infrastructure.database.firebase.client import (
+        connect_to_firebase as connect_database,
+        close_firebase as close_database,
+    )
+    from infrastructure.repositories.firebase.todo_repository import FirebaseTodoRepository
+    from infrastructure.repositories.firebase.user_repository import FirebaseUserRepository
+
+    todo_repository = FirebaseTodoRepository()
+    user_repository = FirebaseUserRepository()
+elif settings.DATABASE_PROVIDER == "postgresql":
+    from infrastructure.database.postgres.client import (
+        connect_to_postgres as connect_database,
+        close_postgres as close_database,
+    )
+    from infrastructure.repositories.postgres.todo_repository import PostgresTodoRepository
+    from infrastructure.repositories.postgres.user_repository import PostgresUserRepository
+
+    todo_repository = PostgresTodoRepository()
+    user_repository = PostgresUserRepository()
+else:
+    raise ValueError("DATABASE_PROVIDER must be 'mongodb', 'firebase', or 'postgresql'.")
 
 
 # ----------------------------------------------------
@@ -35,16 +61,10 @@ from presentation.routes.auth_routes import create_auth_routes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: initialize external infrastructure
-    connect_to_mongodb()
-    try:
-        initialize_firebase()
-        user_repository.ensure_indexes()
-        yield
-    finally:
-        # Shutdown: Close external infrastructure cleanly.
-        close_mongodb_connection()
-        close_firebase()
+    connect_database()
+    user_repository.ensure_indexes()
+    yield
+    close_database()
 
 
 # ----------------------------------------------------
@@ -57,10 +77,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.user_repository = user_repository
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # React Vite dev server
+    allow_origins=[settings.FRONTEND_URL],
     allow_credentials=True,                   # Required for cookies
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,9 +101,6 @@ async def handle_unexpected_error(request: Request, error: Exception) -> JSONRes
 # ----------------------------------------------------
 
 # 1. Infrastructure Layer: Database collection & Repository adapter
-todo_collection = get_todo_collection() # this gave mongodb todos collection object
-todo_repository = MongoTodoRepository(collection=todo_collection) #we pass todos collection to the mongotodorepository
-user_repository = MongoUserRepository(collection=get_user_collection()) 
 password_hasher = PasswordHasher()
 token_service = TokenService()
 

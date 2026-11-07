@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from infrastructure.persistence.mongodb.mvc_database import Database
+from mvc.config.database import Database
 from mvc.routes.todo_routes import router as mvc_todo_router
 from mvc.routes.auth_routes import router as mvc_auth_router
 from mvc.models.user_model import UserModel

@@ -56,8 +56,4 @@ class TokenService:
             subject = payload.get("sub")
             return subject if isinstance(subject, str) else None
         except jwt.InvalidTokenError:
-            # Continue to support Firebase client ID tokens for clients using
-            # Firebase Authentication. Custom app-issued JWTs remain supported.
-            from infrastructure.firebase.auth import get_firebase_subject
-
-            return get_firebase_subject(token)
+            return None

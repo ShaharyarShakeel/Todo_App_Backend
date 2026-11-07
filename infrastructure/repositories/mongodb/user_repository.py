@@ -1,12 +1,13 @@
 from typing import Optional
 
+from bson import ObjectId
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from application.exceptions import UserAlreadyExistsError, UserRepositoryError
 from domain.entities.user import User
 from domain.repositories.user_repository import UserRepository
-from infrastructure.persistence.mongodb.database import get_user_collection
+from infrastructure.database.mongodb.client import get_user_collection
 
 
 class MongoUserRepository(UserRepository):
@@ -43,6 +44,21 @@ class MongoUserRepository(UserRepository):
         except PyMongoError as error:
             raise UserRepositoryError("User storage operation failed.") from error
 
+        if document is None:
+            return None
+        return User(
+            user_id=str(document["_id"]),
+            email=document["email"],
+            password_hash=document["password_hash"],
+        )
+
+    def get_by_id(self, user_id: str) -> Optional[User]:
+        if not ObjectId.is_valid(user_id):
+            return None
+        try:
+            document = self.collection.find_one({"_id": ObjectId(user_id)})
+        except PyMongoError as error:
+            raise UserRepositoryError("User storage operation failed.") from error
         if document is None:
             return None
         return User(

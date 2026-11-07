@@ -25,6 +25,9 @@ class InMemoryUserRepository(UserRepository):
     def get_by_email(self, email: str):
         return self.users.get(email.strip().lower())
 
+    def get_by_id(self, user_id: str):
+        return next((user for user in self.users.values() if user.id == user_id), None)
+
 
 class TestAuthenticationEndpoints(unittest.TestCase):
     def setUp(self):

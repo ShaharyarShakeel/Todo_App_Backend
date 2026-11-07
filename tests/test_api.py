@@ -9,7 +9,7 @@ from bson import ObjectId
 from infrastructure.repositories.in_memory_todo_repository import (
     InMemoryTodoRepository,
 )
-from infrastructure.repositories.mongo_todo_repository import MongoTodoRepository
+from infrastructure.repositories.mongodb.todo_repository import MongoTodoRepository
 from application.use_cases.create_todo import CreateTodo
 from application.use_cases.get_todo import GetTodo
 from application.use_cases.get_all_todos import GetAllTodos
@@ -19,6 +19,7 @@ from application.use_cases.delete_todo import DeleteTodo
 from application.exceptions import TodoRepositoryError
 from domain.exceptions.todo_exceptions import InvalidTodoIdError
 from domain.entities.todo import Todo
+from domain.entities.user import User
 from presentation.controllers.todo_controller import TodoController
 from presentation.routes.todo_routes import create_todo_routes
 from infrastructure.security.auth import TokenService
@@ -39,6 +40,12 @@ class TestTodoAPIEndpoints(unittest.TestCase):
         )
 
         test_app = FastAPI()
+        test_app.state.user_repository = Mock()
+        test_app.state.user_repository.get_by_id.return_value = User(
+            user_id="test@example.com",
+            email="test@example.com",
+            password_hash="test-hash",
+        )
         test_app.include_router(create_todo_routes(controller))
         self.test_app = test_app
         self.unauthenticated_client = TestClient(test_app)
@@ -149,6 +156,14 @@ class TestTodoAPIEndpoints(unittest.TestCase):
             headers={"Authorization": "Bearer invalid-token"},
         )
         self.assertEqual(invalid_token_response.status_code, 401)
+
+    def test_todo_routes_reject_token_when_user_no_longer_exists(self):
+        self.test_app.state.user_repository.get_by_id.return_value = None
+
+        response = self.client.post("/todos/", json={"title": "Should not be created"})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.repository.get_all("test@example.com"), [])
 
     def test_validation_errors(self):
         resp = self.client.post("/todos/", json={"title": ""})

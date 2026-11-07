@@ -1,13 +1,13 @@
+import os
 from pymongo import MongoClient
-from infrastructure.config.settings import settings
 
 class Database:
     """Manages the MongoDB connection for the MVC architecture."""
     
-    MONGO_URL = settings.MONGO_URL
-    DB_NAME = settings.DATABASE_NAME
-    COLLECTION_NAME = settings.MVC_TODO_COLLECTION_NAME
-    USER_COLLECTION_NAME = settings.MVC_USER_COLLECTION_NAME
+    MONGO_URL = os.getenv("MONGO_URL", "mongodb://127.0.0.1:27017")
+    DB_NAME = os.getenv("MONGO_DB_NAME", "todo_db")
+    COLLECTION_NAME = "todos_mvc"
+    USER_COLLECTION_NAME = os.getenv("MONGO_MVC_USER_COLLECTION_NAME", "users_mvc")
 
     _client = None
 

@@ -3,13 +3,13 @@ from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.collection import Collection
 
-from infrastructure.config.settings import settings
+from infrastructure.config.mongodb_settings import mongodb_settings
 
 
 class MongoDBManager:
     """Manages the MongoDB client connection lifecycle."""
 
-    def __init__(self, mongo_url: str = settings.MONGO_URL, db_name: str = settings.DATABASE_NAME):
+    def __init__(self, mongo_url: str = mongodb_settings.URL, db_name: str = mongodb_settings.DATABASE_NAME):
         self._mongo_url = mongo_url
         self._db_name = db_name
         self._client: Optional[MongoClient] = None
@@ -26,7 +26,7 @@ class MongoDBManager:
             self._db = client[self._db_name]
         return self._db
 
-    def get_collection(self, collection_name: str = settings.TODO_COLLECTION_NAME) -> Collection:
+    def get_collection(self, collection_name: str = mongodb_settings.TODO_COLLECTION_NAME) -> Collection:
         return self.get_database()[collection_name]
 
     def connect(self) -> None:
@@ -65,4 +65,4 @@ def get_todo_collection() -> Collection:
 
 
 def get_user_collection() -> Collection:
-    return mongo_manager.get_collection(settings.USER_COLLECTION_NAME)
+    return mongo_manager.get_collection(mongodb_settings.USER_COLLECTION_NAME)

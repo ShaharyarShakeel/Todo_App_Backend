@@ -7,7 +7,7 @@ from application.exceptions import TodoRepositoryError
 from domain.entities.todo import Todo
 from domain.exceptions.todo_exceptions import InvalidTodoIdError
 from domain.repositories.todo_repository import TodoRepository
-from infrastructure.persistence.mongodb.database import get_todo_collection
+from infrastructure.database.mongodb.client import get_todo_collection
 
 
 class MongoTodoRepository(TodoRepository):

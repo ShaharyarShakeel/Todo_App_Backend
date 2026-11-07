@@ -1,4 +1,4 @@
-from infrastructure.persistence.mongodb.database import (
+from infrastructure.database.mongodb.client import (
     MongoDBManager,
     mongo_manager,
     connect_to_mongodb,
