@@ -1,3 +1,4 @@
+"""Provides password hashing and JWT access token management."""
 import base64
 import hashlib
 import hmac

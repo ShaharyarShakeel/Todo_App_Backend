@@ -5,3 +5,4 @@ venv/
 .env
 *firebase-adminsdk*.json
 *service-account*.json
+.vscode/
