@@ -1,3 +1,4 @@
+"""Manages MongoDB connections and provides access to database collections."""
 from typing import Optional
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -66,3 +67,7 @@ def get_todo_collection() -> Collection:
 
 def get_user_collection() -> Collection:
     return mongo_manager.get_collection(mongodb_settings.USER_COLLECTION_NAME)
+
+
+def get_account_registry_collection() -> Collection:
+    return mongo_manager.get_collection("account_registry")

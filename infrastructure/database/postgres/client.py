@@ -1,3 +1,4 @@
+"""Manages PostgreSQL connections and initializes the required database tables."""
 import psycopg
 from psycopg import Connection
 

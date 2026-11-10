@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 from uuid import uuid4
 
 import psycopg
@@ -21,7 +21,7 @@ class PostgresUserRepository(UserRepository):
         return None
 
     def create(self, user: User) -> User:
-        user_id = str(uuid4())
+        user_id = user.id or str(uuid4())
         try:
             with self.manager.get_connection() as connection:
                 connection.execute(
@@ -60,3 +60,16 @@ class PostgresUserRepository(UserRepository):
         if row is None:
             return None
         return User(user_id=row[0], email=row[1], password_hash=row[2])
+
+    def new_user_id(self, email: str) -> str:
+        return str(uuid4())
+
+    def list_users(self) -> List[User]:
+        try:
+            with self.manager.get_connection() as connection:
+                rows = connection.execute(
+                    "SELECT id, email, password_hash FROM users"
+                ).fetchall()
+        except psycopg.Error as error:
+            raise UserRepositoryError("User storage operation failed.") from error
+        return [User(user_id=row[0], email=row[1], password_hash=row[2]) for row in rows]

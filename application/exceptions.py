@@ -6,6 +6,10 @@ class UserRepositoryError(Exception):
     pass
 
 
+class AccountRegistryConflictError(Exception):
+    pass
+
+
 class UserAlreadyExistsError(Exception):
     pass
 

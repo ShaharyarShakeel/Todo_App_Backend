@@ -1,3 +1,6 @@
+"""Manages the Firebase connection by initializing Firebase Admin,
+connecting to Firestore, providing the database client, checking
+database connectivity, and closing the connection when needed."""
 from pathlib import Path
 from typing import Optional
 

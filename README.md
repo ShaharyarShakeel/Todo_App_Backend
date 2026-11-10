@@ -2,18 +2,34 @@
 
 FastAPI backend with separate onion architecture and MVC implementations. Firebase is wired only to the onion architecture; the `mvc/` implementation remains MongoDB-only.
 
-## Onion architecture database
+## Onion architecture databases
 
-The onion API selects its persistence adapter with `DATABASE_PROVIDER` (`firebase`, `mongodb`, or `postgresql`). The local, Git-ignored `.env` selects PostgreSQL; without that variable, the code defaults to Firebase. Firebase uses Cloud Firestore through the Firebase Admin SDK. PostgreSQL uses the `POSTGRES_URL` connection string.
+The onion API keeps MongoDB, Firebase Firestore, and PostgreSQL initialized while it is running. MongoDB also stores the metadata-only `account_registry`, which maps each global account ID and normalized email to its original provider-specific user ID. The registry does not store passwords or todos.
 
-The root `.env` file stores the local database choice and connection settings, JWT signing values, and allowed frontend origin. It is Git-ignored. Start the API with:
+On startup, the API connects to all three databases and backfills existing users. If any provider is unavailable, startup fails rather than routing its accounts elsewhere. If backfill finds duplicate normalized emails or ambiguous provider IDs, startup stops and reports the conflict rather than choosing an assignment. Existing Todo records are not moved or rewritten.
+
+Copy `.env.example` to `.env` and set credentials for all three databases. `DATABASE_PROVIDER` sets the initial default for new registrations. Existing users always log in and use Todos through their saved provider assignment. Switching the default only changes the current process and does not invalidate tokens; restarting restores the initial value from `.env`.
+
+Keep `.env`, the Firebase service account file, and all database credentials private. `DATABASE_SWITCH_PIPE_AUTHKEY` must be a long random local key; a key is already generated in this machine's ignored `.env`. The switch command uses the Python standard library and requires no additional package.
+
+### Start the backend (Terminal 1)
 
 ```powershell
-uvicorn main:app --reload
+cd D:\Sherry\Cloudpacer\Internship\todo-api
+.\venv\Scripts\Activate.ps1
+uvicorn main:app
 ```
 
-The Firebase credential JSON must remain outside the repository. Override `FIREBASE_CREDENTIALS_PATH` via the process environment when running elsewhere. For hosted environments, set it to an empty string and configure Google Application Default Credentials. `JWT_SECRET_KEY` must be set; use a unique, high entropy secret per deployment. Set `FRONTEND_URL` to the frontend's exact origin (scheme and host, plus port if needed).
+### Change the registration default (Terminal 2)
 
-To use PostgreSQL, set `DATABASE_PROVIDER=postgresql` and configure `POSTGRES_URL`. The app creates the `todos` and `users` tables and the todo owner index on startup if they do not exist. To use MongoDB for the onion API, set `DATABASE_PROVIDER=mongodb` and configure `MONGO_URL` plus the optional Mongo database and collection variables. The independent MVC app continues to use its own MongoDB configuration and is not affected by the provider setting.
+Run this from any working directory. The CLI uses only Python's standard library:
 
-Firebase and PostgreSQL adapters live in provider-specific folders under `infrastructure/database/` and `infrastructure/repositories/`. MongoDB adapters remain in their existing files under those infrastructure folders.
+```powershell
+python D:\Sherry\Cloudpacer\Internship\todo-api\switch_database.py firebase
+python D:\Sherry\Cloudpacer\Internship\todo-api\switch_database.py postgresql
+python D:\Sherry\Cloudpacer\Internship\todo-api\switch_database.py mongodb
+```
+
+If `python` is not the project's interpreter, use `D:\Sherry\Cloudpacer\Internship\todo-api\venv\Scripts\python.exe` in its place. Switching uses an authenticated Windows Named Pipe, not an HTTP route. The CLI reports success or a connection/provider error. Run a single local Uvicorn process: multiple workers or backend instances would each hold a separate in-memory default. The separate MVC app remains MongoDB-only and is not changed by this routing.
+
+Provider adapters live under `infrastructure/repositories/{mongodb,firebase,postgres}/`; account registry and runtime provider lifecycle code live under `infrastructure/`.

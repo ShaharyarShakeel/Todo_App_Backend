@@ -1,3 +1,4 @@
+"""Loads Firebase credentials path and Firestore collection names from environment variables."""
 import os
 
 from infrastructure.config.env import load_dotenv  # noqa: F401

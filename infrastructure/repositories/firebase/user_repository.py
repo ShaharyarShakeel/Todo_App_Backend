@@ -1,5 +1,5 @@
 import hashlib
-from typing import Optional
+from typing import List, Optional
 
 from google.api_core.exceptions import GoogleAPIError
 from google.cloud.firestore import Client, transactional
@@ -35,7 +35,7 @@ class FirebaseUserRepository(UserRepository):
 
     def create(self, user: User) -> User:
         email = user.email.strip().lower()
-        document_id = self._document_id(email)
+        document_id = user.id or self._document_id(email)
         reference = self.collection.document(document_id)
         try:
             client = self._client or get_firestore_client()
@@ -86,3 +86,19 @@ class FirebaseUserRepository(UserRepository):
             email=data["email"],
             password_hash=data["password_hash"],
         )
+
+    def new_user_id(self, email: str) -> str:
+        return self._document_id(email)
+
+    def list_users(self) -> List[User]:
+        try:
+            return [
+                User(
+                    user_id=document.id,
+                    email=(document.to_dict() or {})["email"],
+                    password_hash=(document.to_dict() or {}).get("password_hash", ""),
+                )
+                for document in self.collection.stream()
+            ]
+        except GoogleAPIError as error:
+            raise UserRepositoryError("User storage operation failed.") from error

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from bson import ObjectId
 from pymongo.collection import Collection
@@ -26,6 +26,8 @@ class MongoUserRepository(UserRepository):
 
     def create(self, user: User) -> User:
         document = {"email": user.email, "password_hash": user.password_hash}
+        if user.id:
+            document["_id"] = ObjectId(user.id)
         try:
             result = self.collection.insert_one(document)
         except DuplicateKeyError as error:
@@ -66,3 +68,20 @@ class MongoUserRepository(UserRepository):
             email=document["email"],
             password_hash=document["password_hash"],
         )
+
+    def new_user_id(self, email: str) -> str:
+        return str(ObjectId())
+
+    def list_users(self) -> List[User]:
+        try:
+            documents = self.collection.find({}, {"email": 1, "password_hash": 1})
+            return [
+                User(
+                    user_id=str(document["_id"]),
+                    email=document["email"],
+                    password_hash=document.get("password_hash", ""),
+                )
+                for document in documents
+            ]
+        except PyMongoError as error:
+            raise UserRepositoryError("User storage operation failed.") from error

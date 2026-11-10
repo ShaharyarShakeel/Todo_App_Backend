@@ -1,3 +1,4 @@
+"""Loads environment variables so the application can use its settings."""
 import os
 
 from infrastructure.config.env import load_dotenv  # noqa: F401
@@ -13,6 +14,10 @@ class Settings:
         os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
     )
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173").strip().rstrip("/")
+    DATABASE_SWITCH_PIPE_AUTHKEY: str = os.getenv("DATABASE_SWITCH_PIPE_AUTHKEY", "")
+    DATABASE_SWITCH_PIPE_NAME: str = os.getenv(
+        "DATABASE_SWITCH_PIPE_NAME", r"\\.\pipe\TodoApiDatabaseSwitch"
+    )
 
     if not JWT_SECRET_KEY:
         raise ValueError("JWT_SECRET_KEY must be set in the environment or .env file.")

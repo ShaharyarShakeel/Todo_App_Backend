@@ -36,24 +36,37 @@ class PasswordHasher:
 
 
 class TokenService:
-    def create_access_token(self, subject: str) -> str:
+    def create_access_token(
+        self,
+        subject: str,
+        provider: Optional[str] = None,
+        session_generation: Optional[int] = None,
+    ) -> str:
         expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         )
+        payload = {"sub": subject, "exp": expires_at}
+        if provider is not None:
+            payload["provider"] = provider
+        if session_generation is not None:
+            payload["session_generation"] = session_generation
         return jwt.encode(
-            {"sub": subject, "exp": expires_at},
+            payload,
             settings.JWT_SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
         )
 
     def get_subject(self, token: str) -> Optional[str]:
+        payload = self.get_claims(token)
+        subject = payload.get("sub") if payload else None
+        return subject if isinstance(subject, str) else None
+
+    def get_claims(self, token: str) -> Optional[dict]:
         try:
-            payload = jwt.decode(
+            return jwt.decode(
                 token,
                 settings.JWT_SECRET_KEY,
                 algorithms=[settings.JWT_ALGORITHM],
             )
-            subject = payload.get("sub")
-            return subject if isinstance(subject, str) else None
         except jwt.InvalidTokenError:
             return None

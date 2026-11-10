@@ -17,42 +17,41 @@ from application.use_cases.log_in import LogIn
 from presentation.controllers.auth_controller import AuthController
 from presentation.routes.auth_routes import create_auth_routes
 from infrastructure.config.settings import settings
+from infrastructure.database.account_registry_initializer import AccountRegistryInitializer
+from infrastructure.database.provider_catalog import (
+    DatabaseCatalog,
+    DynamicTodoRepository,
+    DynamicUserRepository,
+    ProviderRequestScopeMiddleware,
+)
+from infrastructure.repositories.mongodb.account_registry_repository import (
+    MongoAccountRegistryRepository,
+)
+from infrastructure.database.switch_pipe import DatabaseSwitchPipeServer
 
 
-if settings.DATABASE_PROVIDER == "mongodb":
-    from infrastructure.database.mongodb.client import (
-        connect_to_mongodb as connect_database,
-        close_mongodb_connection as close_database,
-        get_todo_collection,
-        get_user_collection,
-    )
-    from infrastructure.repositories.mongodb.todo_repository import MongoTodoRepository
-    from infrastructure.repositories.mongodb.user_repository import MongoUserRepository
-
-    todo_repository = MongoTodoRepository(collection=get_todo_collection())
-    user_repository = MongoUserRepository(collection=get_user_collection())
-elif settings.DATABASE_PROVIDER == "firebase":
-    from infrastructure.database.firebase.client import (
-        connect_to_firebase as connect_database,
-        close_firebase as close_database,
-    )
-    from infrastructure.repositories.firebase.todo_repository import FirebaseTodoRepository
-    from infrastructure.repositories.firebase.user_repository import FirebaseUserRepository
-
-    todo_repository = FirebaseTodoRepository()
-    user_repository = FirebaseUserRepository()
-elif settings.DATABASE_PROVIDER == "postgresql":
-    from infrastructure.database.postgres.client import (
-        connect_to_postgres as connect_database,
-        close_postgres as close_database,
-    )
-    from infrastructure.repositories.postgres.todo_repository import PostgresTodoRepository
-    from infrastructure.repositories.postgres.user_repository import PostgresUserRepository
-
-    todo_repository = PostgresTodoRepository()
-    user_repository = PostgresUserRepository()
-else:
-    raise ValueError("DATABASE_PROVIDER must be 'mongodb', 'firebase', or 'postgresql'.")
+database_catalog = DatabaseCatalog(settings.DATABASE_PROVIDER)
+account_registry = MongoAccountRegistryRepository()
+account_registry_initializer = AccountRegistryInitializer(account_registry, database_catalog)
+todo_repository = DynamicTodoRepository(database_catalog)
+user_repository = DynamicUserRepository(database_catalog)
+password_hasher = PasswordHasher()
+token_service = TokenService()
+sign_up = SignUp(
+    user_repository,
+    password_hasher,
+    token_service,
+    account_registry=account_registry,
+    provider_catalog=database_catalog,
+)
+log_in = LogIn(
+    user_repository,
+    password_hasher,
+    token_service,
+    account_registry=account_registry,
+    provider_catalog=database_catalog,
+)
+database_switch_pipe = DatabaseSwitchPipeServer(database_catalog)
 
 
 # ----------------------------------------------------
@@ -61,10 +60,15 @@ else:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    connect_database()
-    user_repository.ensure_indexes()
-    yield
-    close_database()
+    database_catalog.initialize_all()
+    try:
+        account_registry_initializer.initialize()
+        database_switch_pipe.start()
+        print(f"Default registration database: {database_catalog.default_provider}")
+        yield
+    finally:
+        database_switch_pipe.stop()
+        database_catalog.close_all()
 
 
 # ----------------------------------------------------
@@ -77,6 +81,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.provider_catalog = database_catalog
+app.state.account_registry = account_registry
+app.state.token_service = token_service
+app.add_middleware(ProviderRequestScopeMiddleware, catalog=database_catalog)
 app.state.user_repository = user_repository
 
 app.add_middleware(
@@ -100,10 +108,6 @@ async def handle_unexpected_error(request: Request, error: Exception) -> JSONRes
 # Composition Root
 # ----------------------------------------------------
 
-# 1. Infrastructure Layer: Database collection & Repository adapter
-password_hasher = PasswordHasher()
-token_service = TokenService()
-
 # 2. Application Layer: Use cases with injected Domain Repository
 create_todo = CreateTodo(repository=todo_repository)
 get_todo = GetTodo(repository=todo_repository)
@@ -111,8 +115,6 @@ get_all_todos = GetAllTodos(repository=todo_repository)
 update_todo = UpdateTodo(repository=todo_repository)
 patch_todo = PatchTodo(repository=todo_repository)
 delete_todo = DeleteTodo(repository=todo_repository)
-sign_up = SignUp(user_repository, password_hasher, token_service)
-log_in = LogIn(user_repository, password_hasher, token_service)
 
 # 3. Presentation Layer: Controller with injected Use Cases
 todo_controller = TodoController(

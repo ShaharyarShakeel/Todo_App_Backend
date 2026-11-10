@@ -28,6 +28,12 @@ class InMemoryUserRepository(UserRepository):
     def get_by_id(self, user_id: str):
         return next((user for user in self.users.values() if user.id == user_id), None)
 
+    def list_users(self):
+        return list(self.users.values())
+
+    def new_user_id(self, email: str) -> str:
+        return str(self.next_id)
+
 
 class TestAuthenticationEndpoints(unittest.TestCase):
     def setUp(self):
