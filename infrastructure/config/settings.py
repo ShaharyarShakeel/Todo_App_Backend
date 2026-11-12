@@ -13,6 +13,7 @@ class Settings:
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
         os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
     )
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173").strip().rstrip("/")
     DATABASE_SWITCH_PIPE_AUTHKEY: str = os.getenv("DATABASE_SWITCH_PIPE_AUTHKEY", "")
     DATABASE_SWITCH_PIPE_NAME: str = os.getenv(

@@ -19,6 +19,10 @@ class LogInSchema(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class GoogleSignInSchema(BaseModel):
+    credential: str = Field(min_length=1)
+
+
 class AuthResponseSchema(BaseModel):
     id: str
     email: str

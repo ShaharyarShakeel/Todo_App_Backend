@@ -24,11 +24,14 @@ from application.use_cases.create_todo import CreateTodo
 from application.use_cases.delete_todo import DeleteTodo
 from application.use_cases.get_all_todos import GetAllTodos
 from application.use_cases.get_todo import GetTodo
+from application.use_cases.google_sign_in import GoogleSignIn
+from application.use_cases.google_sign_in import GoogleSignIn
 from application.use_cases.log_in import LogIn
 from application.use_cases.patch_todo import PatchTodo
 from application.use_cases.sign_up import SignUp
 from application.use_cases.update_todo import UpdateTodo
 from domain.entities.account_assignment import AccountAssignment
+from application.dtos.verified_google_identity import VerifiedGoogleIdentity
 from domain.entities.user import User
 from infrastructure.database.account_registry_initializer import AccountRegistryInitializer
 from infrastructure.database.provider_catalog import (
@@ -87,6 +90,7 @@ class MemoryRegistry:
     def __init__(self):
         self.by_id = {}
         self.by_email = {}
+        self.by_google_sub = {}
         self.lock = Lock()
 
     def ensure_indexes(self):
@@ -95,7 +99,12 @@ class MemoryRegistry:
     def reserve(self, assignment):
         with self.lock:
             email_provider = (assignment.email_normalized, assignment.provider)
-            if assignment.user_id in self.by_id or email_provider in self.by_email:
+            google_provider = (assignment.google_sub, assignment.provider)
+            if (
+                assignment.user_id in self.by_id
+                or email_provider in self.by_email
+                or (assignment.google_sub and google_provider in self.by_google_sub)
+            ):
                 raise UserAlreadyExistsError("duplicate")
             pending = AccountAssignment(
                 assignment.user_id,
@@ -103,9 +112,12 @@ class MemoryRegistry:
                 assignment.provider,
                 assignment.provider_user_id,
                 "pending",
+                assignment.google_sub,
             )
             self.by_id[pending.user_id] = pending
             self.by_email[email_provider] = pending
+            if pending.google_sub:
+                self.by_google_sub[(pending.google_sub, pending.provider)] = pending
 
     def activate(self, user_id):
         with self.lock:
@@ -116,9 +128,12 @@ class MemoryRegistry:
                 record.provider,
                 record.provider_user_id,
                 "active",
+                record.google_sub,
             )
             self.by_id[user_id] = active
             self.by_email[(active.email_normalized, active.provider)] = active
+            if active.google_sub:
+                self.by_google_sub[(active.google_sub, active.provider)] = active
 
     def delete_pending(self, user_id):
         with self.lock:
@@ -126,6 +141,8 @@ class MemoryRegistry:
             if record and record.status == "pending":
                 self.by_id.pop(user_id)
                 self.by_email.pop((record.email_normalized, record.provider), None)
+                if record.google_sub:
+                    self.by_google_sub.pop((record.google_sub, record.provider), None)
 
     def add_existing(self, assignment):
         self.reserve(assignment)
@@ -133,6 +150,30 @@ class MemoryRegistry:
 
     def get_by_email(self, email_normalized, provider):
         return self.by_email.get((email_normalized, provider))
+
+    def get_by_google_sub(self, google_sub, provider):
+        return self.by_google_sub.get((google_sub, provider))
+
+    def set_google_sub(self, user_id, provider, google_sub):
+        with self.lock:
+            key = (google_sub, provider)
+            existing = self.by_google_sub.get(key)
+            if existing and existing.user_id != user_id:
+                raise UserAlreadyExistsError("Google identity already linked")
+            record = self.by_id[user_id]
+            if record.google_sub and record.google_sub != google_sub:
+                raise UserAlreadyExistsError("A different Google identity is already linked")
+            updated = AccountAssignment(
+                record.user_id,
+                record.email_normalized,
+                record.provider,
+                record.provider_user_id,
+                record.status,
+                google_sub,
+            )
+            self.by_id[user_id] = updated
+            self.by_email[(updated.email_normalized, updated.provider)] = updated
+            self.by_google_sub[key] = updated
 
     def get_by_user_id(self, user_id):
         return self.by_id.get(user_id)
@@ -158,6 +199,18 @@ class FastHasher:
         return hashed == "hash:" + password
 
 
+class MemoryGoogleIdentityVerifier:
+    def __init__(self):
+        self.identities = {}
+
+    def verify(self, credential):
+        if credential not in self.identities:
+            from application.exceptions import InvalidGoogleCredentialError
+
+            raise InvalidGoogleCredentialError("Invalid Google credential")
+        return self.identities[credential]
+
+
 class TestMultiDatabaseRouting(unittest.TestCase):
     def setUp(self):
         self.catalog = DatabaseCatalog("mongodb")
@@ -170,6 +223,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
             )
         self.registry = MemoryRegistry()
         self.token_service = TokenService()
+        self.google_verifier = MemoryGoogleIdentityVerifier()
         self.sign_up = SignUp(
             DynamicUserRepository(self.catalog),
             FastHasher(),
@@ -184,6 +238,13 @@ class TestMultiDatabaseRouting(unittest.TestCase):
             account_registry=self.registry,
             provider_catalog=self.catalog,
         )
+        self.google_sign_in = GoogleSignIn(
+            self.registry,
+            self.catalog,
+            self.token_service,
+            FastHasher(),
+            self.google_verifier,
+        )
         todo_controller = TodoController(
             create_todo=CreateTodo(DynamicTodoRepository(self.catalog)),
             get_todo=GetTodo(DynamicTodoRepository(self.catalog)),
@@ -197,7 +258,11 @@ class TestMultiDatabaseRouting(unittest.TestCase):
         app.state.account_registry = self.registry
         app.state.token_service = self.token_service
         app.add_middleware(ProviderRequestScopeMiddleware, catalog=self.catalog)
-        app.include_router(create_auth_routes(AuthController(self.sign_up, self.log_in)))
+        app.include_router(
+            create_auth_routes(
+                AuthController(self.sign_up, self.log_in, self.google_sign_in)
+            )
+        )
         app.include_router(create_todo_routes(todo_controller))
         self.app = app
         self.client = TestClient(app)
@@ -350,6 +415,69 @@ class TestMultiDatabaseRouting(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             claims = self.token_service.get_claims(response.json()["access_token"])
             self.assertEqual(claims["provider"], provider)
+
+    def test_google_sign_in_creates_then_reuses_account_in_selected_provider(self):
+        self.google_verifier.identities["google-credential"] = VerifiedGoogleIdentity(
+            "google-sub-1", "new-google@gmail.com", True
+        )
+        first = self.client.post(
+            "/auth/google", json={"credential": "google-credential"}
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        claims = self.token_service.get_claims(first.json()["access_token"])
+        self.assertEqual(claims["provider"], "mongodb")
+        self.assertEqual(claims["session_generation"], self.catalog.session_generation)
+        assignment = self.registry.get_by_google_sub("google-sub-1", "mongodb")
+        self.assertEqual(assignment.user_id, first.json()["id"])
+        self.assertEqual(len(self.catalog.user_repository_for("mongodb").list_users()), 1)
+
+        second = self.client.post(
+            "/auth/google", json={"credential": "google-credential"}
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["id"], first.json()["id"])
+        self.assertEqual(len(self.catalog.user_repository_for("mongodb").list_users()), 1)
+
+    def test_google_sign_in_only_uses_selected_provider(self):
+        self.google_verifier.identities["google-credential"] = VerifiedGoogleIdentity(
+            "google-shared-sub", "shared-google@gmail.com", True
+        )
+        mongo = self.client.post(
+            "/auth/google", json={"credential": "google-credential"}
+        )
+        self.assertEqual(mongo.status_code, 200, mongo.text)
+        self.catalog.switch_default("firebase")
+        firebase = self.client.post(
+            "/auth/google", json={"credential": "google-credential"}
+        )
+        self.assertEqual(firebase.status_code, 200, firebase.text)
+        self.assertNotEqual(firebase.json()["id"], mongo.json()["id"])
+        self.assertIsNotNone(self.registry.get_by_google_sub("google-shared-sub", "mongodb"))
+        self.assertIsNotNone(self.registry.get_by_google_sub("google-shared-sub", "firebase"))
+
+    def test_google_sign_in_does_not_link_untrusted_email_to_existing_account(self):
+        self.signup("mongodb", "external@example.net")
+        self.google_verifier.identities["external-google"] = VerifiedGoogleIdentity(
+            "external-sub", "external@example.net", False
+        )
+        response = self.client.post(
+            "/auth/google", json={"credential": "external-google"}
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIsNone(self.registry.get_by_google_sub("external-sub", "mongodb"))
+
+    def test_google_sign_in_links_authoritative_gmail_account(self):
+        self.signup("mongodb", "linked@gmail.com")
+        self.google_verifier.identities["gmail-google"] = VerifiedGoogleIdentity(
+            "gmail-sub", "linked@gmail.com", True
+        )
+        response = self.client.post("/auth/google", json={"credential": "gmail-google"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            self.registry.get_by_google_sub("gmail-sub", "mongodb").email_normalized,
+            "linked@gmail.com",
+        )
+        self.assertEqual(len(self.catalog.user_repository_for("mongodb").list_users()), 1)
 
     def test_deleted_user_and_invalid_provider_claim_are_rejected(self):
         account = self.signup("postgresql", "deleted@example.com")
@@ -582,16 +710,23 @@ class TestMongoAccountRegistryIndexes(unittest.TestCase):
             def drop_index(self, name):
                 self.dropped.append(name)
 
-            def create_index(self, keys, unique=False):
-                self.created.append((keys, unique))
+            def create_index(self, keys, unique=False, **kwargs):
+                self.created.append((keys, unique, kwargs))
 
         collection = RecordingCollection()
         MongoAccountRegistryRepository(collection).ensure_indexes()
 
         self.assertEqual(collection.dropped, ["email_normalized_1"])
-        self.assertIn(("user_id", True), collection.created)
+        self.assertTrue(any(keys == "user_id" and unique for keys, unique, _ in collection.created))
         self.assertIn(
-            ([("email_normalized", 1), ("provider", 1)], True), collection.created
+            ([("email_normalized", 1), ("provider", 1)], True, {}), collection.created
+        )
+        google_index = next(
+            item for item in collection.created if item[0] == [("google_sub", 1), ("provider", 1)]
+        )
+        self.assertTrue(google_index[1])
+        self.assertEqual(
+            google_index[2]["partialFilterExpression"], {"google_sub": {"$type": "string"}}
         )
 
 

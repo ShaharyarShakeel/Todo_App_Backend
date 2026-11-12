@@ -1,3 +1,9 @@
+"""Defines the repository interface for managing account assignments.
+
+Provides methods to reserve, activate, retrieve, and list account
+assignments without depending on any specific database implementation.
+The infrastructure layer implements these operations.
+"""
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
@@ -32,6 +38,16 @@ class AccountRegistry(ABC):
     def get_by_email(
         self, email_normalized: str, provider: str
     ) -> Optional[AccountAssignment]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_by_google_sub(
+        self, google_sub: str, provider: str
+    ) -> Optional[AccountAssignment]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_google_sub(self, user_id: str, provider: str, google_sub: str) -> None:
         raise NotImplementedError
 
     @abstractmethod

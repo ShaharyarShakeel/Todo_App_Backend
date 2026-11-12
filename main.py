@@ -12,8 +12,10 @@ from application.use_cases.delete_todo import DeleteTodo
 from presentation.controllers.todo_controller import TodoController
 from presentation.routes.todo_routes import create_todo_routes
 from infrastructure.security.auth import PasswordHasher, TokenService
+from infrastructure.security.google_identity_verifier import GoogleIdentityVerifierAdapter
 from application.use_cases.sign_up import SignUp
 from application.use_cases.log_in import LogIn
+from application.use_cases.google_sign_in import GoogleSignIn
 from presentation.controllers.auth_controller import AuthController
 from presentation.routes.auth_routes import create_auth_routes
 from infrastructure.config.settings import settings
@@ -50,6 +52,13 @@ log_in = LogIn(
     token_service,
     account_registry=account_registry,
     provider_catalog=database_catalog,
+)
+google_sign_in = GoogleSignIn(
+    registry=account_registry,
+    provider_catalog=database_catalog,
+    token_service=token_service,
+    password_hasher=password_hasher,
+    identity_verifier=GoogleIdentityVerifierAdapter(settings.GOOGLE_CLIENT_ID),
 )
 database_switch_pipe = DatabaseSwitchPipeServer(database_catalog)
 
@@ -128,7 +137,9 @@ todo_controller = TodoController(
 
 # 4. Presentation Layer: Register API Routes
 app.include_router(create_todo_routes(controller=todo_controller))
-auth_controller = AuthController(sign_up=sign_up, log_in=log_in)
+auth_controller = AuthController(
+    sign_up=sign_up, log_in=log_in, google_sign_in=google_sign_in
+)
 app.include_router(create_auth_routes(controller=auth_controller))
 
 

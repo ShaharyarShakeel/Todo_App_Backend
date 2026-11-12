@@ -32,6 +32,11 @@ class MongoAccountRegistryRepository(AccountRegistry):
             self.collection.create_index(
                 [("email_normalized", 1), ("provider", 1)], unique=True
             )
+            self.collection.create_index(
+                [("google_sub", 1), ("provider", 1)],
+                unique=True,
+                partialFilterExpression={"google_sub": {"$type": "string"}},
+            )
         except PyMongoError as error:
             if getattr(error, "code", None) in (11000, 11001) or isinstance(error, DuplicateKeyError):
                 raise AccountRegistryConflictError(
@@ -91,6 +96,36 @@ class MongoAccountRegistryRepository(AccountRegistry):
             {"email_normalized": email_normalized, "provider": provider}
         )
 
+    def get_by_google_sub(
+        self, google_sub: str, provider: str
+    ) -> Optional[AccountAssignment]:
+        return self._find_one({"google_sub": google_sub, "provider": provider})
+
+    def set_google_sub(self, user_id: str, provider: str, google_sub: str) -> None:
+        try:
+            result = self.collection.update_one(
+                {
+                    "user_id": user_id,
+                    "provider": provider,
+                    "$or": [
+                        {"google_sub": {"$exists": False}},
+                        {"google_sub": None},
+                        {"google_sub": google_sub},
+                    ],
+                },
+                {"$set": {"google_sub": google_sub}},
+            )
+            if result.matched_count == 0:
+                raise UserAlreadyExistsError(
+                    "This account is already linked to a different Google account."
+                )
+        except DuplicateKeyError as error:
+            raise UserAlreadyExistsError(
+                "This Google account is already linked to another account in this provider."
+            ) from error
+        except PyMongoError as error:
+            raise UserRepositoryError("Account registry operation failed.") from error
+
     def get_by_user_id(self, user_id: str) -> Optional[AccountAssignment]:
         return self._find_one({"user_id": user_id})
 
@@ -132,12 +167,15 @@ class MongoAccountRegistryRepository(AccountRegistry):
 
     @staticmethod
     def _to_document(assignment: AccountAssignment) -> dict:
-        return {
+        document = {
             "user_id": assignment.user_id,
             "email_normalized": assignment.email_normalized,
             "provider": assignment.provider,
             "provider_user_id": assignment.provider_user_id,
         }
+        if assignment.google_sub:
+            document["google_sub"] = assignment.google_sub
+        return document
 
     @staticmethod
     def _from_document(document: dict) -> AccountAssignment:
@@ -147,4 +185,5 @@ class MongoAccountRegistryRepository(AccountRegistry):
             provider=document["provider"],
             provider_user_id=document["provider_user_id"],
             status=document.get("status", "active"),
+            google_sub=document.get("google_sub"),
         )

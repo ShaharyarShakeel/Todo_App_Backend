@@ -16,3 +16,19 @@ class UserAlreadyExistsError(Exception):
 
 class InvalidCredentialsError(Exception):
     pass
+
+
+class InvalidGoogleCredentialError(Exception):
+    pass
+
+
+class GoogleSignInConfigurationError(Exception):
+    pass
+
+
+class GoogleIdentityProviderUnavailableError(Exception):
+    pass
+
+
+class GoogleAccountLinkRequiredError(Exception):
+    pass
