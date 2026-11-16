@@ -1,9 +1,11 @@
+from datetime import date
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TodoCreateSchema(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
+    due_date: date
     description: Optional[str] = None
 
     @field_validator("title")
@@ -24,6 +26,7 @@ class TodoCreateSchema(BaseModel):
 
 class TodoUpdateSchema(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
+    due_date: Optional[date] = None
     description: Optional[str] = None
     completed: bool
 
@@ -45,6 +48,7 @@ class TodoUpdateSchema(BaseModel):
 
 class TodoPatchSchema(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    due_date: Optional[date] = None
     description: Optional[str] = None
     completed: Optional[bool] = None
 
@@ -71,5 +75,6 @@ class TodoResponseSchema(BaseModel):
 
     id: str
     title: str
+    due_date: Optional[date] = None
     description: Optional[str] = None
     completed: bool

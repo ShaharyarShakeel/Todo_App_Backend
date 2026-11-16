@@ -30,5 +30,17 @@ class GoogleIdentityProviderUnavailableError(Exception):
     pass
 
 
+class GitHubSignInConfigurationError(Exception):
+    pass
+
+
+class InvalidGitHubCredentialError(Exception):
+    pass
+
+
+class GitHubIdentityProviderUnavailableError(Exception):
+    pass
+
+
 class GoogleAccountLinkRequiredError(Exception):
     pass

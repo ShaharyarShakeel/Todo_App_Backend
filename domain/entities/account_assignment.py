@@ -17,3 +17,4 @@ class AccountAssignment:
     provider_user_id: str
     status: str = "active"
     google_sub: Optional[str] = None
+    github_sub: Optional[str] = None

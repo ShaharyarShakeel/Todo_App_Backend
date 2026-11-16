@@ -1,6 +1,7 @@
 from domain.entities.todo import Todo
 from domain.repositories.todo_repository import TodoRepository
 from application.dtos.todo_dto import TodoCreateDTO, TodoDTO
+from application.services.todo_reminder_scheduler import calculate_reminder_due_at
 
 
 class CreateTodo:
@@ -17,6 +18,12 @@ class CreateTodo:
             description=data.description,
             completed=False,
             owner_id=owner_id,
+            due_date=data.due_date,
+            reminder_due_at=(
+                calculate_reminder_due_at(data.due_date)
+                if data.due_date is not None
+                else None
+            ),
         )
         print(f"[3. USE CASE]         Calling Repository Interface: repository.create(todo)")
         created_todo = self.repository.create(todo)
@@ -26,4 +33,5 @@ class CreateTodo:
             title=created_todo.title,
             description=created_todo.description,
             completed=created_todo.completed,
+            due_date=created_todo.due_date,
         )

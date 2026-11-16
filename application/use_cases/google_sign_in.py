@@ -1,3 +1,4 @@
+import logging
 import secrets
 from uuid import uuid4
 
@@ -12,6 +13,8 @@ from domain.entities.user import User
 from domain.repositories.account_registry import AccountRegistry
 from domain.repositories.user_repository import UserRepository
 
+logger = logging.getLogger(__name__)
+
 
 class GoogleSignIn:
     """Verifies Google identity and signs in within the selected provider only."""
@@ -23,12 +26,14 @@ class GoogleSignIn:
         token_service,
         password_hasher,
         identity_verifier: GoogleIdentityVerifier,
+        email_sender=None,
     ):
         self.registry = registry
         self.provider_catalog = provider_catalog
         self.token_service = token_service
         self.password_hasher = password_hasher
         self.identity_verifier = identity_verifier
+        self.email_sender = email_sender
 
     def execute(self, credential: str) -> AuthDTO:
         identity = self.identity_verifier.verify(credential)
@@ -110,6 +115,12 @@ class GoogleSignIn:
             raise
 
         self.registry.activate(assignment.user_id)
+        if self.email_sender is not None:
+            try:
+                self.email_sender.send_welcome_email(identity.email)
+            except Exception:
+                # Account creation succeeded; a mail provider outage must not undo it.
+                logger.exception("Failed to send welcome email to a new Google account.")
         return AccountAssignment(
             user_id=assignment.user_id,
             email_normalized=assignment.email_normalized,

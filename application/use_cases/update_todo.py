@@ -1,6 +1,7 @@
 from domain.exceptions.todo_exceptions import TodoNotFoundError
 from domain.repositories.todo_repository import TodoRepository
 from application.dtos.todo_dto import TodoDTO, TodoUpdateDTO
+from application.services.todo_reminder_scheduler import calculate_reminder_due_at
 
 
 class UpdateTodo:
@@ -18,11 +19,19 @@ class UpdateTodo:
             raise TodoNotFoundError(f"Todo with ID '{data.todo_id}' not found.")
 
         print(f"[3. USE CASE]         Invoking Domain Entity update method: todo.update(...)")
+        previous_due_date = todo.due_date
         todo.update(
             title=data.title,
             description=data.description,
             completed=data.completed,
+            due_date=data.due_date,
         )
+        if todo.due_date != previous_due_date:
+            todo.reschedule_reminder(
+                calculate_reminder_due_at(todo.due_date)
+                if todo.due_date is not None
+                else None
+            )
 
         print(f"[3. USE CASE]         Persisting updated Todo via repository.update(...)")
         updated_todo = self.repository.update(todo)
@@ -38,4 +47,5 @@ class UpdateTodo:
             title=updated_todo.title,
             description=updated_todo.description,
             completed=updated_todo.completed,
+            due_date=updated_todo.due_date,
         )

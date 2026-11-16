@@ -1,3 +1,4 @@
+import logging
 from application.dtos.auth_dto import AuthDTO
 from application.exceptions import UserAlreadyExistsError
 from domain.entities.account_assignment import AccountAssignment
@@ -5,6 +6,8 @@ from domain.entities.user import User
 from domain.repositories.account_registry import AccountRegistry
 from domain.repositories.user_repository import UserRepository
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 class SignUp:
@@ -15,12 +18,14 @@ class SignUp:
         token_service,
         account_registry: AccountRegistry = None,
         provider_catalog=None,
+        email_sender=None,
     ):
         self.repository = repository
         self.password_hasher = password_hasher
         self.token_service = token_service
         self.account_registry = account_registry
         self.provider_catalog = provider_catalog
+        self.email_sender = email_sender
 
     def execute(self, email: str, password: str) -> AuthDTO:
         normalized_email = email.strip().lower()
@@ -35,6 +40,7 @@ class SignUp:
             password_hash=self.password_hasher.hash(password),
         )
         created_user = self.repository.create(user)
+        self._send_welcome_email(created_user.email)
         return AuthDTO(
             id=created_user.id,
             email=created_user.email,
@@ -82,6 +88,7 @@ class SignUp:
             raise
 
         self.account_registry.activate(user_id)
+        self._send_welcome_email(user.email)
         return AuthDTO(
             id=user_id,
             email=user.email,
@@ -89,3 +96,12 @@ class SignUp:
                 user_id, provider=provider, session_generation=session_generation
             ),
         )
+
+    def _send_welcome_email(self, email: str) -> None:
+        if self.email_sender is None:
+            return
+        try:
+            self.email_sender.send_welcome_email(email)
+        except Exception:
+            # Email delivery is best-effort; the account has already been created.
+            logger.exception("Failed to send welcome email to a new account.")

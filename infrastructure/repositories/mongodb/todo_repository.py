@@ -1,6 +1,8 @@
+from datetime import date, datetime, timezone
 from typing import List, Optional
 from bson import ObjectId
 from pymongo.collection import Collection
+from pymongo import ReturnDocument
 from pymongo.errors import PyMongoError
 
 from application.exceptions import TodoRepositoryError
@@ -31,6 +33,11 @@ class MongoTodoRepository(TodoRepository):
             "title": todo.title,
             "description": todo.description,
             "completed": todo.completed,
+            "due_date": todo.due_date.isoformat() if todo.due_date else None,
+            "reminder_due_at": todo.reminder_due_at,
+            "reminder_sent_at": todo.reminder_sent_at,
+            "reminder_claimed_until": todo.reminder_claimed_until,
+            "reminder_claim_id": todo.reminder_claim_id,
             "owner_id": todo.owner_id,
         }
         try:
@@ -75,6 +82,11 @@ class MongoTodoRepository(TodoRepository):
                         "title": todo.title,
                         "description": todo.description,
                         "completed": todo.completed,
+                        "due_date": todo.due_date.isoformat() if todo.due_date else None,
+                        "reminder_due_at": todo.reminder_due_at,
+                        "reminder_sent_at": todo.reminder_sent_at,
+                        "reminder_claimed_until": todo.reminder_claimed_until,
+                        "reminder_claim_id": todo.reminder_claim_id,
                     }
                 },
             )
@@ -98,12 +110,170 @@ class MongoTodoRepository(TodoRepository):
         except PyMongoError as error:
             raise TodoRepositoryError("Todo storage operation failed.") from error
 
+    def get_unscheduled_reminders(self, limit: int) -> List[Todo]:
+        try:
+            documents = self.collection.find(
+                {
+                    "completed": {"$ne": True},
+                    "due_date": {"$ne": None},
+                    "$or": [
+                        {"reminder_due_at": {"$exists": False}},
+                        {"reminder_due_at": None},
+                    ],
+                }
+            ).limit(limit)
+            return [self._to_domain(document) for document in documents]
+        except PyMongoError as error:
+            raise TodoRepositoryError("Todo storage operation failed.") from error
+
+    def schedule_reminder(
+        self, todo_id: str, due_date: date, reminder_due_at: datetime
+    ) -> bool:
+        if not ObjectId.is_valid(todo_id):
+            raise InvalidTodoIdError(f"Todo ID '{todo_id}' is invalid.")
+        try:
+            result = self.collection.update_one(
+                {
+                    "_id": ObjectId(todo_id),
+                    "due_date": due_date.isoformat(),
+                    "completed": {"$ne": True},
+                    "$or": [
+                        {"reminder_due_at": {"$exists": False}},
+                        {"reminder_due_at": None},
+                    ],
+                },
+                {
+                    "$set": {
+                        "reminder_due_at": reminder_due_at,
+                        "reminder_sent_at": None,
+                        "reminder_claimed_until": None,
+                        "reminder_claim_id": None,
+                    }
+                },
+            )
+            return result.modified_count > 0
+        except PyMongoError as error:
+            raise TodoRepositoryError("Todo storage operation failed.") from error
+
+    def claim_due_reminders(
+        self, now: datetime, lease_until: datetime, claim_id: str, limit: int
+    ) -> List[Todo]:
+        eligible = {
+            "completed": {"$ne": True},
+            "reminder_due_at": {"$lte": now},
+            "$and": [
+                {
+                    "$or": [
+                        {"reminder_sent_at": {"$exists": False}},
+                        {"reminder_sent_at": None},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"reminder_claimed_until": {"$exists": False}},
+                        {"reminder_claimed_until": None},
+                        {"reminder_claimed_until": {"$lte": now}},
+                    ]
+                },
+            ],
+        }
+        claimed = []
+        try:
+            candidates = self.collection.find(eligible).sort("reminder_due_at", 1).limit(limit)
+            for candidate in candidates:
+                query = dict(eligible, _id=candidate["_id"])
+                document = self.collection.find_one_and_update(
+                    query,
+                    {
+                        "$set": {
+                            "reminder_claimed_until": lease_until,
+                            "reminder_claim_id": claim_id,
+                        }
+                    },
+                    return_document=ReturnDocument.AFTER,
+                )
+                if document:
+                    claimed.append(self._to_domain(document))
+            return claimed
+        except PyMongoError as error:
+            raise TodoRepositoryError("Todo storage operation failed.") from error
+
+    def mark_reminder_sent(
+        self,
+        todo_id: str,
+        reminder_due_at: datetime,
+        claim_id: str,
+        sent_at: datetime,
+    ) -> bool:
+        if not ObjectId.is_valid(todo_id):
+            raise InvalidTodoIdError(f"Todo ID '{todo_id}' is invalid.")
+        try:
+            result = self.collection.update_one(
+                {
+                    "_id": ObjectId(todo_id),
+                    "reminder_due_at": reminder_due_at,
+                    "reminder_claim_id": claim_id,
+                    "reminder_sent_at": None,
+                    "completed": {"$ne": True},
+                },
+                {
+                    "$set": {"reminder_sent_at": sent_at},
+                    "$unset": {
+                        "reminder_claimed_until": "",
+                        "reminder_claim_id": "",
+                    },
+                },
+            )
+            return result.modified_count > 0
+        except PyMongoError as error:
+            raise TodoRepositoryError("Todo storage operation failed.") from error
+
+    def release_reminder_claim(
+        self, todo_id: str, reminder_due_at: datetime, claim_id: str
+    ) -> bool:
+        if not ObjectId.is_valid(todo_id):
+            raise InvalidTodoIdError(f"Todo ID '{todo_id}' is invalid.")
+        try:
+            result = self.collection.update_one(
+                {
+                    "_id": ObjectId(todo_id),
+                    "reminder_due_at": reminder_due_at,
+                    "reminder_claim_id": claim_id,
+                    "reminder_sent_at": None,
+                },
+                {
+                    "$unset": {
+                        "reminder_claimed_until": "",
+                        "reminder_claim_id": "",
+                    }
+                },
+            )
+            return result.modified_count > 0
+        except PyMongoError as error:
+            raise TodoRepositoryError("Todo storage operation failed.") from error
+
     @staticmethod
     def _to_domain(document: dict) -> Todo:
+        def as_utc(value):
+            if value is None:
+                return None
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+
         return Todo(
             todo_id=str(document["_id"]),
             title=document["title"],
             description=document.get("description"),
             completed=document.get("completed", False),
             owner_id=document.get("owner_id"),
+            due_date=(
+                date.fromisoformat(document["due_date"])
+                if document.get("due_date")
+                else None
+            ),
+            reminder_due_at=as_utc(document.get("reminder_due_at")),
+            reminder_sent_at=as_utc(document.get("reminder_sent_at")),
+            reminder_claimed_until=as_utc(document.get("reminder_claimed_until")),
+            reminder_claim_id=document.get("reminder_claim_id"),
         )

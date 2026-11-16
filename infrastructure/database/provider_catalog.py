@@ -1,10 +1,12 @@
 """Initializes and manages all database connections, handles database switching, and routes user operations to the correct database."""
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import date, datetime
 import secrets
 from threading import RLock
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
+from application.ports.reminder_repository_provider import ReminderRepositories
 from domain.entities.todo import Todo
 from domain.entities.user import User
 from domain.repositories.todo_repository import TodoRepository
@@ -135,6 +137,17 @@ class DatabaseCatalog:
         if errors:
             raise RuntimeError("One or more database providers failed to close.") from errors[0]
 
+    def active_reminder_repositories(self) -> List[ReminderRepositories]:
+        """Return Todo/User repository pairs for providers initialized in this process."""
+        with self._lock:
+            return [
+                ReminderRepositories(
+                    todos=bundle.todo_repository,
+                    users=bundle.user_repository,
+                )
+                for bundle in self._providers.values()
+            ]
+
     def switch_default(self, provider: str) -> tuple[str, str, bool]:
         provider = self.validate_provider(provider)
         with self._lock:
@@ -201,6 +214,41 @@ class DynamicTodoRepository(TodoRepository):
 
     def delete(self, todo_id: str, owner_id: str) -> bool:
         return self._repository().delete(todo_id, owner_id)
+
+    def get_unscheduled_reminders(self, limit: int):
+        return self._repository().get_unscheduled_reminders(limit)
+
+    def schedule_reminder(
+        self, todo_id: str, due_date: date, reminder_due_at: datetime
+    ) -> bool:
+        return self._repository().schedule_reminder(
+            todo_id, due_date, reminder_due_at
+        )
+
+    def claim_due_reminders(
+        self, now: datetime, lease_until: datetime, claim_id: str, limit: int
+    ):
+        return self._repository().claim_due_reminders(
+            now, lease_until, claim_id, limit
+        )
+
+    def mark_reminder_sent(
+        self,
+        todo_id: str,
+        reminder_due_at: datetime,
+        claim_id: str,
+        sent_at: datetime,
+    ) -> bool:
+        return self._repository().mark_reminder_sent(
+            todo_id, reminder_due_at, claim_id, sent_at
+        )
+
+    def release_reminder_claim(
+        self, todo_id: str, reminder_due_at: datetime, claim_id: str
+    ) -> bool:
+        return self._repository().release_reminder_claim(
+            todo_id, reminder_due_at, claim_id
+        )
 
     def _repository(self) -> TodoRepository:
         return self.catalog.todo_repository_for(self.catalog.request_provider())

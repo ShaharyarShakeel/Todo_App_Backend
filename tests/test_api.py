@@ -57,7 +57,7 @@ class TestTodoAPIEndpoints(unittest.TestCase):
         # 1. Create
         create_resp = self.client.post(
             "/todos/",
-            json={"title": "Integration Todo", "description": "Testing CRUD"},
+            json={"title": "Integration Todo", "description": "Testing CRUD", "due_date": "2099-01-01"},
         )
         self.assertEqual(create_resp.status_code, 201)
         data = create_resp.json()
@@ -107,7 +107,7 @@ class TestTodoAPIEndpoints(unittest.TestCase):
     def test_todos_are_isolated_between_users_for_all_operations(self):
         first_todo = self.client.post(
             "/todos/",
-            json={"title": "First user's todo"},
+            json={"title": "First user's todo", "due_date": "2099-01-01"},
         ).json()
 
         other_client = TestClient(self.test_app)
@@ -117,7 +117,7 @@ class TestTodoAPIEndpoints(unittest.TestCase):
 
         second_todo = other_client.post(
             "/todos/",
-            json={"title": "Second user's todo"},
+            json={"title": "Second user's todo", "due_date": "2099-01-01"},
         ).json()
 
         self.assertEqual(len(self.client.get("/todos/").json()), 1)

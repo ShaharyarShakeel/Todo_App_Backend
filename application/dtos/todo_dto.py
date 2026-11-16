@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from typing import Optional
 
 
@@ -6,6 +7,7 @@ from typing import Optional
 class TodoCreateDTO:
     title: str
     description: Optional[str] = None
+    due_date: Optional[date] = None
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,7 @@ class TodoUpdateDTO:
     title: str
     description: Optional[str]
     completed: bool
+    due_date: Optional[date] = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class TodoPatchDTO:
     title: Optional[str] = None
     description: Optional[str] = None
     completed: Optional[bool] = None
+    due_date: Optional[date] = None
 
 
 @dataclass(frozen=True)
@@ -30,3 +34,4 @@ class TodoDTO:
     title: str
     description: Optional[str]
     completed: bool
+    due_date: Optional[date] = None

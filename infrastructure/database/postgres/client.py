@@ -34,11 +34,35 @@ class PostgresManager:
                             title TEXT NOT NULL,
                             description TEXT,
                             completed BOOLEAN NOT NULL DEFAULT FALSE,
+                            due_date DATE,
+                            reminder_due_at TIMESTAMPTZ,
+                            reminder_sent_at TIMESTAMPTZ,
+                            reminder_claimed_until TIMESTAMPTZ,
+                            reminder_claim_id TEXT,
                             owner_id TEXT NOT NULL,
                             CONSTRAINT fk_todos_owner_id_users
                                 FOREIGN KEY (owner_id) REFERENCES users (id)
                         )
                         """
+                    )
+                    # Add the date column to existing tables without changing rows.
+                    cursor.execute(
+                        "ALTER TABLE todos ADD COLUMN IF NOT EXISTS due_date DATE"
+                    )
+                    cursor.execute(
+                        "ALTER TABLE todos ADD COLUMN IF NOT EXISTS reminder_due_at TIMESTAMPTZ"
+                    )
+                    cursor.execute(
+                        "ALTER TABLE todos ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ"
+                    )
+                    cursor.execute(
+                        "ALTER TABLE todos ADD COLUMN IF NOT EXISTS reminder_claimed_until TIMESTAMPTZ"
+                    )
+                    cursor.execute(
+                        "ALTER TABLE todos ADD COLUMN IF NOT EXISTS reminder_claim_id TEXT"
+                    )
+                    cursor.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_todos_due_reminders ON todos (reminder_due_at) WHERE completed = FALSE AND reminder_sent_at IS NULL"
                     )
                     cursor.execute(
                         """

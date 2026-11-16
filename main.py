@@ -9,13 +9,19 @@ from application.use_cases.get_all_todos import GetAllTodos
 from application.use_cases.update_todo import UpdateTodo
 from application.use_cases.patch_todo import PatchTodo
 from application.use_cases.delete_todo import DeleteTodo
+from application.use_cases.send_todo_reminders import SendTodoReminders
 from presentation.controllers.todo_controller import TodoController
 from presentation.routes.todo_routes import create_todo_routes
+from presentation.controllers.todo_reminder_controller import TodoReminderController
+from presentation.routes.cron_routes import create_cron_routes
 from infrastructure.security.auth import PasswordHasher, TokenService
 from infrastructure.security.google_identity_verifier import GoogleIdentityVerifierAdapter
+from infrastructure.security.github_oauth_client import GitHubOAuthClient
+from infrastructure.email.resend_email_sender import ResendEmailSender
 from application.use_cases.sign_up import SignUp
 from application.use_cases.log_in import LogIn
 from application.use_cases.google_sign_in import GoogleSignIn
+from application.use_cases.github_sign_in import GitHubSignIn
 from presentation.controllers.auth_controller import AuthController
 from presentation.routes.auth_routes import create_auth_routes
 from infrastructure.config.settings import settings
@@ -39,12 +45,22 @@ todo_repository = DynamicTodoRepository(database_catalog)
 user_repository = DynamicUserRepository(database_catalog)
 password_hasher = PasswordHasher()
 token_service = TokenService()
+email_sender = ResendEmailSender(
+    api_key=settings.RESEND_API_KEY,
+    from_email=settings.RESEND_FROM_EMAIL,
+    allowed_resend_recipient=settings.RESEND_ALLOWED_RECIPIENT,
+    gmail_address=settings.GMAIL_ADDRESS,
+    gmail_app_password=settings.GMAIL_APP_PASSWORD,
+    smtp_server=settings.SMTP_SERVER,
+    smtp_port=settings.SMTP_PORT,
+)
 sign_up = SignUp(
     user_repository,
     password_hasher,
     token_service,
     account_registry=account_registry,
     provider_catalog=database_catalog,
+    email_sender=email_sender,
 )
 log_in = LogIn(
     user_repository,
@@ -59,6 +75,20 @@ google_sign_in = GoogleSignIn(
     token_service=token_service,
     password_hasher=password_hasher,
     identity_verifier=GoogleIdentityVerifierAdapter(settings.GOOGLE_CLIENT_ID),
+    email_sender=email_sender,
+)
+github_identity_provider = GitHubOAuthClient(
+    client_id=settings.GITHUB_CLIENT_ID,
+    client_secret=settings.GITHUB_CLIENT_SECRET,
+    redirect_uri=settings.GITHUB_REDIRECT_URI,
+)
+github_sign_in = GitHubSignIn(
+    registry=account_registry,
+    provider_catalog=database_catalog,
+    token_service=token_service,
+    password_hasher=password_hasher,
+    identity_provider=github_identity_provider,
+    email_sender=email_sender,
 )
 database_switch_pipe = DatabaseSwitchPipeServer(database_catalog)
 
@@ -93,6 +123,9 @@ app = FastAPI(
 app.state.provider_catalog = database_catalog
 app.state.account_registry = account_registry
 app.state.token_service = token_service
+app.state.cron_secret = settings.CRON_SECRET
+app.state.github_redirect_uri = settings.GITHUB_REDIRECT_URI
+app.state.frontend_url = settings.FRONTEND_URL
 app.add_middleware(ProviderRequestScopeMiddleware, catalog=database_catalog)
 app.state.user_repository = user_repository
 
@@ -137,8 +170,17 @@ todo_controller = TodoController(
 
 # 4. Presentation Layer: Register API Routes
 app.include_router(create_todo_routes(controller=todo_controller))
+todo_reminder_use_case = SendTodoReminders(
+    repository_provider=database_catalog,
+    email_sender=email_sender,
+)
+todo_reminder_controller = TodoReminderController(todo_reminder_use_case)
+app.include_router(create_cron_routes(controller=todo_reminder_controller))
 auth_controller = AuthController(
-    sign_up=sign_up, log_in=log_in, google_sign_in=google_sign_in
+    sign_up=sign_up,
+    log_in=log_in,
+    google_sign_in=google_sign_in,
+    github_sign_in=github_sign_in,
 )
 app.include_router(create_auth_routes(controller=auth_controller))
 

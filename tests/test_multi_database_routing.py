@@ -91,6 +91,7 @@ class MemoryRegistry:
         self.by_id = {}
         self.by_email = {}
         self.by_google_sub = {}
+        self.by_github_sub = {}
         self.lock = Lock()
 
     def ensure_indexes(self):
@@ -100,10 +101,12 @@ class MemoryRegistry:
         with self.lock:
             email_provider = (assignment.email_normalized, assignment.provider)
             google_provider = (assignment.google_sub, assignment.provider)
+            github_provider = (assignment.github_sub, assignment.provider)
             if (
                 assignment.user_id in self.by_id
                 or email_provider in self.by_email
                 or (assignment.google_sub and google_provider in self.by_google_sub)
+                or (assignment.github_sub and github_provider in self.by_github_sub)
             ):
                 raise UserAlreadyExistsError("duplicate")
             pending = AccountAssignment(
@@ -113,11 +116,14 @@ class MemoryRegistry:
                 assignment.provider_user_id,
                 "pending",
                 assignment.google_sub,
+                assignment.github_sub,
             )
             self.by_id[pending.user_id] = pending
             self.by_email[email_provider] = pending
             if pending.google_sub:
                 self.by_google_sub[(pending.google_sub, pending.provider)] = pending
+            if pending.github_sub:
+                self.by_github_sub[(pending.github_sub, pending.provider)] = pending
 
     def activate(self, user_id):
         with self.lock:
@@ -129,11 +135,14 @@ class MemoryRegistry:
                 record.provider_user_id,
                 "active",
                 record.google_sub,
+                record.github_sub,
             )
             self.by_id[user_id] = active
             self.by_email[(active.email_normalized, active.provider)] = active
             if active.google_sub:
                 self.by_google_sub[(active.google_sub, active.provider)] = active
+            if active.github_sub:
+                self.by_github_sub[(active.github_sub, active.provider)] = active
 
     def delete_pending(self, user_id):
         with self.lock:
@@ -143,6 +152,8 @@ class MemoryRegistry:
                 self.by_email.pop((record.email_normalized, record.provider), None)
                 if record.google_sub:
                     self.by_google_sub.pop((record.google_sub, record.provider), None)
+                if record.github_sub:
+                    self.by_github_sub.pop((record.github_sub, record.provider), None)
 
     def add_existing(self, assignment):
         self.reserve(assignment)
@@ -170,10 +181,36 @@ class MemoryRegistry:
                 record.provider_user_id,
                 record.status,
                 google_sub,
+                record.github_sub,
             )
             self.by_id[user_id] = updated
             self.by_email[(updated.email_normalized, updated.provider)] = updated
             self.by_google_sub[key] = updated
+
+    def get_by_github_sub(self, github_sub, provider):
+        return self.by_github_sub.get((github_sub, provider))
+
+    def set_github_sub(self, user_id, provider, github_sub):
+        with self.lock:
+            key = (github_sub, provider)
+            existing = self.by_github_sub.get(key)
+            if existing and existing.user_id != user_id:
+                raise UserAlreadyExistsError("GitHub identity already linked")
+            record = self.by_id[user_id]
+            if record.github_sub and record.github_sub != github_sub:
+                raise UserAlreadyExistsError("A different GitHub identity is already linked")
+            updated = AccountAssignment(
+                record.user_id,
+                record.email_normalized,
+                record.provider,
+                record.provider_user_id,
+                record.status,
+                record.google_sub,
+                github_sub,
+            )
+            self.by_id[user_id] = updated
+            self.by_email[(updated.email_normalized, updated.provider)] = updated
+            self.by_github_sub[key] = updated
 
     def get_by_user_id(self, user_id):
         return self.by_id.get(user_id)
@@ -304,7 +341,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
             headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
             response = self.client.post(
                 "/todos/",
-                json={"title": email},
+                json={"title": email, "due_date": "2099-01-01"},
                 headers=headers,
             )
             self.assertEqual(response.status_code, 201, response.text)
@@ -371,12 +408,12 @@ class TestMultiDatabaseRouting(unittest.TestCase):
 
         headers = {"Authorization": f"Bearer {old_token}"}
         self.assertEqual(
-            self.client.post("/todos/", json={"title": "blocked"}, headers=headers).status_code,
+            self.client.post("/todos/", json={"title": "blocked", "due_date": "2099-01-01"}, headers=headers).status_code,
             401,
         )
         self.catalog.switch_default("mongodb")
         self.assertEqual(
-            self.client.post("/todos/", json={"title": "still blocked"}, headers=headers).status_code,
+            self.client.post("/todos/", json={"title": "still blocked", "due_date": "2099-01-01"}, headers=headers).status_code,
             401,
         )
 
@@ -391,7 +428,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
         self.assertEqual(
             self.client.post(
                 "/todos/",
-                json={"title": "allowed after login"},
+                json={"title": "allowed after login", "due_date": "2099-01-01"},
                 headers={"Authorization": f"Bearer {login.json()['access_token']}"},
             ).status_code,
             201,
@@ -486,7 +523,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
 
         deleted_response = self.client.post(
             "/todos/",
-            json={"title": "blocked"},
+                json={"title": "blocked", "due_date": "2099-01-01"},
             headers={"Authorization": f"Bearer {account['access_token']}"},
         )
         self.assertEqual(deleted_response.status_code, 401)
@@ -494,7 +531,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
         invalid_token = self.token_service.create_access_token(assignment.user_id, provider="other")
         invalid_response = self.client.post(
             "/todos/",
-            json={"title": "blocked"},
+                json={"title": "blocked", "due_date": "2099-01-01"},
             headers={"Authorization": f"Bearer {invalid_token}"},
         )
         self.assertEqual(invalid_response.status_code, 401)
@@ -522,7 +559,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
         self.catalog.user_repository_for("mongodb").get_by_id = unavailable
         response = self.client.post(
             "/todos/",
-            json={"title": "blocked"},
+                json={"title": "blocked", "due_date": "2099-01-01"},
             headers={"Authorization": f"Bearer {account['access_token']}"},
         )
         self.assertEqual(response.status_code, 503)
@@ -546,7 +583,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
             pending = pool.submit(
                 self.client.post,
                 "/todos/",
-                json={"title": "in flight"},
+                json={"title": "in flight", "due_date": "2099-01-01"},
                 headers={"Authorization": f"Bearer {account['access_token']}"},
             )
             self.assertTrue(entered.wait(2))
@@ -592,7 +629,7 @@ class TestMultiDatabaseRouting(unittest.TestCase):
         def create(provider):
             return self.client.post(
                 "/todos/",
-                json={"title": provider},
+                json={"title": provider, "due_date": "2099-01-01"},
                 headers={"Authorization": f"Bearer {accounts[provider]['access_token']}"},
             )
 
@@ -727,6 +764,13 @@ class TestMongoAccountRegistryIndexes(unittest.TestCase):
         self.assertTrue(google_index[1])
         self.assertEqual(
             google_index[2]["partialFilterExpression"], {"google_sub": {"$type": "string"}}
+        )
+        github_index = next(
+            item for item in collection.created if item[0] == [("github_sub", 1), ("provider", 1)]
+        )
+        self.assertTrue(github_index[1])
+        self.assertEqual(
+            github_index[2]["partialFilterExpression"], {"github_sub": {"$type": "string"}}
         )
 
 

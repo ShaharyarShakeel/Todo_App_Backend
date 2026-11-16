@@ -22,4 +22,5 @@ class GetTodo:
             title=todo.title,
             description=todo.description,
             completed=todo.completed,
+            due_date=todo.due_date,
         )

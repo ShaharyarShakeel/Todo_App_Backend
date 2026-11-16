@@ -56,6 +56,7 @@ class TodoController:
             request = TodoCreateDTO(
                 title=data.title,
                 description=data.description,
+                due_date=data.due_date,
             )
             print("[2. CONTROLLER]       Calling Use Case: CreateTodo.execute(...)")
             result = self.create_todo.execute(request, owner_id)
@@ -125,6 +126,7 @@ class TodoController:
                 title=data.title,
                 description=data.description,
                 completed=data.completed,
+                due_date=data.due_date,
             )
             print("[2. CONTROLLER]       Calling Use Case: UpdateTodo.execute(...)")
             result = self.update_todo.execute(request, owner_id)
@@ -160,6 +162,7 @@ class TodoController:
                 title=data.title,
                 description=data.description,
                 completed=data.completed,
+                due_date=data.due_date,
             )
             print("[2. CONTROLLER]       Calling Use Case: PatchTodo.execute(...)")
             result = self.patch_todo.execute(request, owner_id)

@@ -51,6 +51,16 @@ class AccountRegistry(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_by_github_sub(
+        self, github_sub: str, provider: str
+    ) -> Optional[AccountAssignment]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def set_github_sub(self, user_id: str, provider: str, github_sub: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     def get_by_user_id(self, user_id: str) -> Optional[AccountAssignment]:
         raise NotImplementedError
 

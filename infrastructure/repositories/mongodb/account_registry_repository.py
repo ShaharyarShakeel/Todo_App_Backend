@@ -37,6 +37,11 @@ class MongoAccountRegistryRepository(AccountRegistry):
                 unique=True,
                 partialFilterExpression={"google_sub": {"$type": "string"}},
             )
+            self.collection.create_index(
+                [("github_sub", 1), ("provider", 1)],
+                unique=True,
+                partialFilterExpression={"github_sub": {"$type": "string"}},
+            )
         except PyMongoError as error:
             if getattr(error, "code", None) in (11000, 11001) or isinstance(error, DuplicateKeyError):
                 raise AccountRegistryConflictError(
@@ -126,6 +131,36 @@ class MongoAccountRegistryRepository(AccountRegistry):
         except PyMongoError as error:
             raise UserRepositoryError("Account registry operation failed.") from error
 
+    def get_by_github_sub(
+        self, github_sub: str, provider: str
+    ) -> Optional[AccountAssignment]:
+        return self._find_one({"github_sub": github_sub, "provider": provider})
+
+    def set_github_sub(self, user_id: str, provider: str, github_sub: str) -> None:
+        try:
+            result = self.collection.update_one(
+                {
+                    "user_id": user_id,
+                    "provider": provider,
+                    "$or": [
+                        {"github_sub": {"$exists": False}},
+                        {"github_sub": None},
+                        {"github_sub": github_sub},
+                    ],
+                },
+                {"$set": {"github_sub": github_sub}},
+            )
+            if result.matched_count == 0:
+                raise UserAlreadyExistsError(
+                    "This account is already linked to a different GitHub account."
+                )
+        except DuplicateKeyError as error:
+            raise UserAlreadyExistsError(
+                "This GitHub account is already linked to another account in this provider."
+            ) from error
+        except PyMongoError as error:
+            raise UserRepositoryError("Account registry operation failed.") from error
+
     def get_by_user_id(self, user_id: str) -> Optional[AccountAssignment]:
         return self._find_one({"user_id": user_id})
 
@@ -175,6 +210,8 @@ class MongoAccountRegistryRepository(AccountRegistry):
         }
         if assignment.google_sub:
             document["google_sub"] = assignment.google_sub
+        if assignment.github_sub:
+            document["github_sub"] = assignment.github_sub
         return document
 
     @staticmethod
@@ -186,4 +223,5 @@ class MongoAccountRegistryRepository(AccountRegistry):
             provider_user_id=document["provider_user_id"],
             status=document.get("status", "active"),
             google_sub=document.get("google_sub"),
+            github_sub=document.get("github_sub"),
         )
